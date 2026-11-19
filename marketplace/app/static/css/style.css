@@ -1,0 +1,62 @@
+:root {
+  --bg: #f6f7fb; --card: #ffffff; --text: #1d2333; --muted: #667085; --border: #e3e6ee;
+  --primary: #3b5bdb; --primary-dark: #2f4ac0; --danger: #d6336c; --ok: #2b8a3e; --warn: #e8590c;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #12141c; --card: #1b1e29; --text: #e7e9f0; --muted: #9aa3b5; --border: #2c3142;
+          --primary: #5c7cfa; --primary-dark: #4c6ef5; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+       background: var(--bg); color: var(--text); }
+nav#nav { display: flex; gap: 18px; align-items: center; padding: 12px 24px; background: var(--card);
+          border-bottom: 1px solid var(--border); flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
+nav a { color: var(--text); text-decoration: none; }
+nav a:hover { color: var(--primary); }
+nav .brand { font-weight: 700; }
+nav .spacer { flex: 1; }
+main { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+h1 { font-size: 1.6rem; margin: 0 0 16px; }
+h2 { font-size: 1.2rem; margin: 24px 0 12px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.product h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.product .price { font-size: 1.2rem; font-weight: 700; margin: 8px 0; }
+.muted { color: var(--muted); font-size: .9rem; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.stack > * + * { margin-top: 12px; }
+label { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 4px; }
+input, select, textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px;
+                          background: var(--card); color: var(--text); font: inherit; }
+input[type=number] { width: 90px; }
+textarea { min-height: 70px; }
+button, .btn { display: inline-block; padding: 9px 16px; border: 0; border-radius: 8px; background: var(--primary);
+               color: #fff; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+button:hover, .btn:hover { background: var(--primary-dark); }
+button:disabled { opacity: .55; cursor: not-allowed; }
+button.secondary { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
+button.danger { background: var(--danger); }
+button.link { background: none; color: var(--text); padding: 0; font-weight: 400; }
+button.link:hover { color: var(--primary); }
+.btn.small, button.small { padding: 5px 11px; font-size: .85rem; }
+.form { max-width: 440px; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 12px; overflow: hidden; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: .78rem; font-weight: 700;
+         text-transform: uppercase; background: var(--border); }
+.badge.paid, .badge.verified, .badge.published, .badge.approved { background: #d3f9d8; color: #1b5e20; }
+.badge.failed, .badge.declined, .badge.rejected { background: #ffe3e3; color: #a51111; }
+.badge.shipped { background: #d0ebff; color: #0b4f8a; }
+.badge.delivered { background: #e5dbff; color: #4c2a9e; }
+.badge.draft, .badge.unverified { background: #fff3bf; color: #7a5b00; }
+.flash { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border); }
+.flash.error { background: #ffe3e3; color: #8a1010; border-color: #ffc9c9; }
+.flash.ok { background: #d3f9d8; color: #1b5e20; border-color: #b2f2bb; }
+.flash.info { background: #e7f5ff; color: #0b4f8a; border-color: #a5d8ff; }
+.totals td { border: 0; padding: 4px 12px; }
+.totals .grand td { font-size: 1.15rem; font-weight: 700; border-top: 1px solid var(--border); }
+.two-col { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
+@media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+.row > input[type=search] { flex: 1; width: auto; min-width: 200px; }

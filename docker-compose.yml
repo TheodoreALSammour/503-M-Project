@@ -1,0 +1,102 @@
+# Start everything with:   docker compose up --build
+# Marketplace UI:          http://localhost:8000
+# Swagger UI (all APIs):   http://localhost:8000/api/docs
+
+services:
+  # Generates random keys/passwords once into a private volume.
+  secrets-init:
+    image: python:3.12-alpine
+    command: ["python", "/scripts/gen_secrets.py", "/secrets"]
+    volumes:
+      - ./scripts/gen_secrets.py:/scripts/gen_secrets.py:ro
+      - shared_secrets:/secrets
+    restart: "no"
+
+  # Marketplace database (PostgreSQL) - not published to the host.
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: marketplace
+      POSTGRES_DB: marketplace
+      POSTGRES_PASSWORD_FILE: /run/shared-secrets/db_password
+    volumes:
+      - shared_secrets:/run/shared-secrets:ro
+      - db_data:/var/lib/postgresql/data
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d marketplace"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  # Shared rate-limit counters for all marketplace workers.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [backend]
+
+  # Payment Gateway Simulator - its own service and its own (SQLite) database.
+  # Reachable only on the internal network, never from the host/browser.
+  gateway:
+    build: ./gateway
+    environment:
+      GATEWAY_DATABASE_URL: sqlite:////data/gateway.db
+      GATEWAY_MERCHANT_ID: marketplace
+      GATEWAY_REQUEST_KEY_FILE: /run/shared-secrets/gateway_request_key
+      GATEWAY_RESPONSE_KEY_FILE: /run/shared-secrets/gateway_response_key
+      LOG_DIR: /logs
+    volumes:
+      - shared_secrets:/run/shared-secrets:ro
+      - gateway_data:/data
+      - gateway_logs:/logs
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    networks: [payments]
+
+  marketplace:
+    build: ./marketplace
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DB_HOST: db
+      DB_USER: marketplace
+      DB_NAME: marketplace
+      DB_PASSWORD_FILE: /run/shared-secrets/db_password
+      MARKETPLACE_SECRET_KEY_FILE: /run/shared-secrets/marketplace_secret_key
+      GATEWAY_URL: http://gateway:9000
+      GATEWAY_MERCHANT_ID: marketplace
+      GATEWAY_REQUEST_KEY_FILE: /run/shared-secrets/gateway_request_key
+      GATEWAY_RESPONSE_KEY_FILE: /run/shared-secrets/gateway_response_key
+      RATELIMIT_STORAGE_URI: redis://redis:6379/0
+      # Set to "true" when served over HTTPS (behind a TLS reverse proxy).
+      SESSION_COOKIE_SECURE: "false"
+      LOG_DIR: /logs
+    volumes:
+      - shared_secrets:/run/shared-secrets:ro
+      - marketplace_logs:/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      gateway:
+        condition: service_started
+    networks: [frontend, backend, payments]
+
+networks:
+  frontend:
+  backend:
+    internal: true
+  payments:
+    internal: true
+
+volumes:
+  shared_secrets:
+  db_data:
+  gateway_data:
+  gateway_logs:
+  marketplace_logs:

@@ -1,0 +1,62 @@
+openapi: 3.0.3
+info:
+  title: Payment Gateway Simulator
+  version: 1.0.0
+  description: |
+    Internal service (not exposed outside the Docker network). Every request must be
+    signed by the merchant with HMAC-SHA256 using the *request key*; every response is
+    signed by the gateway with the *response key*.
+
+    Request signature: `hex(HMAC_SHA256(request_key, ts + "\n" + nonce + "\n" + METHOD + "\n" + path + "\n" + sha256hex(body)))`
+
+    Response signature: `hex(HMAC_SHA256(response_key, ts + "\n" + request_nonce + "\n" + http_status + "\n" + sha256hex(body)))`
+
+    Card labels: `TEST-APPROVE` is approved, `TEST-DECLINE` (and any other label) is declined.
+paths:
+  /v1/charges:
+    post:
+      summary: Charge a test card
+      parameters:
+        - {in: header, name: X-Merchant-Id, required: true, schema: {type: string, example: marketplace}}
+        - {in: header, name: X-Timestamp, required: true, schema: {type: string, description: Unix seconds, must be within 300s}}
+        - {in: header, name: X-Nonce, required: true, schema: {type: string, pattern: "^[a-f0-9]{32,64}$", description: Single use}}
+        - {in: header, name: X-Signature, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [card_label, amount, currency, idempotency_key]
+              properties:
+                card_label: {type: string, example: TEST-APPROVE}
+                amount: {type: integer, minimum: 0, description: Amount in integer cents}
+                currency: {type: string, enum: [USD]}
+                idempotency_key: {type: string, minLength: 8, maxLength: 128}
+      responses:
+        "200":
+          description: Charge result (approved or declined). Signed.
+          headers:
+            X-Gateway-Timestamp: {schema: {type: string}}
+            X-Gateway-Signature: {schema: {type: string}}
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  charge_id: {type: string, example: ch_3f1c2a9b8e7d6c5b4a3f2e1d}
+                  status: {type: string, enum: [approved, declined]}
+                  amount: {type: integer}
+                  currency: {type: string}
+                  idempotency_key: {type: string}
+                  decline_reason: {type: string, nullable: true}
+                  created_at: {type: string, format: date-time}
+        "400": {description: Invalid request body (signed)}
+        "401": {description: Unknown merchant, bad/missing signature, stale timestamp or replayed nonce (signed)}
+        "409": {description: Idempotency key reused with different parameters (signed)}
+  /health:
+    get:
+      summary: Liveness probe
+      responses:
+        "200": {description: OK}

@@ -1,0 +1,708 @@
+openapi: 3.0.3
+info:
+  title: Multi-Vendor Marketplace API
+  version: 1.0.0
+  description: |
+    EECE 503M Software Security project.
+
+    **How to authenticate in Swagger UI**
+    1. `POST /api/auth/login` with `{"email": "...", "password": "...", "mode": "bearer"}`.
+    2. Copy `access_token`, click **Authorize** and paste it (bearerAuth).
+
+    Browser sessions (`mode: "cookie"`) use an HttpOnly cookie; state-changing requests made with
+    the cookie must also send the `X-CSRF-Token` header (value returned by login / `GET /api/auth/me`).
+    Bearer requests do not need it.
+
+    Every endpoint is authorized by the central policy module (RBAC permission matrix + ABAC
+    policies P1-P4, see `app/policy/policy_config.yaml`). Unknown body fields are rejected (400),
+    so prices, totals, roles, owners or statuses can never be supplied by the client.
+
+    Admin and Finance Officer features are API-only. The seeded admin must call
+    `POST /api/admin/change-credentials` before any other admin action.
+servers:
+  - url: /
+tags:
+  - {name: Public, description: Visitors (no login)}
+  - {name: Auth, description: Registration, login, own password}
+  - {name: Buyer, description: Checkout and own orders}
+  - {name: Seller, description: Own products and orders for own products}
+  - {name: Finance Officer, description: Coupons and payments (API only)}
+  - {name: Admin, description: Seller verification and account suspension (API only)}
+  - {name: Web pages, description: HTML shells of the Buyer/Seller frontend}
+
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+    cookieAuth: {type: apiKey, in: cookie, name: mp_session}
+  parameters:
+    page: {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+    per_page: {in: query, name: per_page, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+    orderId: {in: path, name: order_id, required: true, schema: {type: integer}}
+    productId: {in: path, name: product_id, required: true, schema: {type: integer}}
+    userId: {in: path, name: user_id, required: true, schema: {type: integer}}
+    csrf: {in: header, name: X-CSRF-Token, required: false, schema: {type: string},
+           description: Required only for cookie-authenticated state-changing requests}
+  responses:
+    BadRequest: {description: Validation error (including unknown fields), content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Unauthorized: {description: Not logged in / bad credentials, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Forbidden: {description: Denied by the policy module (RBAC or ABAC) or CSRF failure, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    NotFound: {description: Not found, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Conflict: {description: Conflict (state / duplicate / idempotency), content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    TooMany: {description: Rate limit exceeded, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: {type: string}
+        message: {type: string}
+        field: {type: string, nullable: true}
+        request_id: {type: string}
+    SellerProfile:
+      type: object
+      properties:
+        user_id: {type: integer}
+        store_name: {type: string}
+        verification_status: {type: string, enum: [unverified, verified]}
+        applied_at: {type: string, format: date-time}
+        verified_at: {type: string, format: date-time, nullable: true}
+    User:
+      type: object
+      properties:
+        id: {type: integer}
+        full_name: {type: string}
+        email: {type: string}
+        phone: {type: string}
+        roles: {type: array, items: {type: string, enum: [buyer, seller, finance_officer, admin]}}
+        status: {type: string, enum: [active, suspended]}
+        must_change_credentials: {type: boolean}
+        seller: {allOf: [{$ref: "#/components/schemas/SellerProfile"}], nullable: true}
+    Product:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        description: {type: string}
+        price_cents: {type: integer}
+        price: {type: string, example: "24.99"}
+        stock: {type: integer}
+        status: {type: string, enum: [draft, published]}
+        seller_id: {type: integer}
+        store_name: {type: string}
+    OrderItem:
+      type: object
+      properties:
+        product_id: {type: integer}
+        product_name: {type: string}
+        unit_price_cents: {type: integer}
+        quantity: {type: integer}
+        line_total_cents: {type: integer}
+    Order:
+      type: object
+      properties:
+        id: {type: integer}
+        buyer_id: {type: integer}
+        seller_id: {type: integer}
+        status: {type: string, enum: [paid, failed, shipped, delivered]}
+        subtotal_cents: {type: integer}
+        discount_cents: {type: integer}
+        total_cents: {type: integer}
+        total: {type: string}
+        currency: {type: string, example: USD}
+        coupon_code: {type: string, nullable: true}
+        shipping_address: {type: string}
+        charge_id: {type: string, nullable: true}
+        tracking_number: {type: string, nullable: true}
+        failure_reason: {type: string, nullable: true}
+        created_at: {type: string, format: date-time}
+        items: {type: array, items: {$ref: "#/components/schemas/OrderItem"}}
+    Coupon:
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+        type: {type: string, enum: [percentage, fixed]}
+        percent: {type: string, nullable: true, example: "12.50"}
+        amount_cents: {type: integer, nullable: true}
+        valid_from: {type: string, format: date-time}
+        valid_until: {type: string, format: date-time}
+        max_uses: {type: integer}
+        used_count: {type: integer}
+    Payment:
+      type: object
+      properties:
+        id: {type: integer}
+        order_id: {type: integer}
+        buyer_id: {type: integer}
+        charge_id: {type: string, nullable: true}
+        amount_cents: {type: integer}
+        amount: {type: string}
+        currency: {type: string}
+        outcome: {type: string, enum: [approved, declined, rejected]}
+        signature_verified: {type: boolean}
+        detail: {type: string}
+        created_at: {type: string, format: date-time}
+    CartItem:
+      type: object
+      additionalProperties: false
+      required: [product_id, quantity]
+      properties:
+        product_id: {type: integer, minimum: 1}
+        quantity: {type: integer, minimum: 1, maximum: 1000, description: Must also be <= available stock}
+    Page:
+      type: object
+      properties:
+        page: {type: integer}
+        per_page: {type: integer}
+        total: {type: integer}
+
+paths:
+  # ------------------------------------------------------------ public --
+  /api/products:
+    get:
+      tags: [Public]
+      summary: Browse / search Published products (visitors allowed)
+      parameters:
+        - {in: query, name: q, schema: {type: string, maxLength: 100}, description: Search in name and description}
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Published products only
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    properties: {products: {type: array, items: {$ref: "#/components/schemas/Product"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+  /api/products/{product_id}:
+    get:
+      tags: [Public]
+      summary: Product details (drafts only visible to their seller - otherwise 404)
+      parameters: [{$ref: "#/components/parameters/productId"}]
+      responses:
+        "200": {description: Product, content: {application/json: {schema: {type: object, properties: {product: {$ref: "#/components/schemas/Product"}}}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  # -------------------------------------------------------------- auth --
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Self-register as a Buyer (visitors only). Rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [full_name, email, phone, password]
+              properties:
+                full_name: {type: string, example: Eve Example}
+                email: {type: string, format: email, example: eve@example.com}
+                phone: {type: string, example: "+961 70 123456"}
+                password: {type: string, format: password, minLength: 12, example: "Str0ng!Passw0rd"}
+      responses:
+        "201": {description: Created (role is always buyer), content: {application/json: {schema: {type: object, properties: {user: {$ref: "#/components/schemas/User"}}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooMany"}
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in. Rate limited per IP and per account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email: {type: string, example: finance1@marketplace.local}
+                password: {type: string, format: password, example: "Finance#One2026"}
+                mode: {type: string, enum: [bearer, cookie], default: bearer,
+                       description: "bearer: token returned in body (Swagger/Postman). cookie: HttpOnly cookie (browser)."}
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: {$ref: "#/components/schemas/User"}
+                  access_token: {type: string, description: Only in bearer mode}
+                  token_type: {type: string, example: Bearer}
+                  expires_in: {type: integer}
+                  csrf_token: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Account suspended}
+        "429": {$ref: "#/components/responses/TooMany"}
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current session
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/csrf"}]
+      responses:
+        "200": {description: Logged out}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      responses:
+        "200": {description: Current user and CSRF token, content: {application/json: {schema: {type: object, properties: {user: {$ref: "#/components/schemas/User"}, csrf_token: {type: string}}}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/account/password:
+    post:
+      tags: [Auth]
+      summary: Update own password (all roles). Other sessions are revoked.
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/csrf"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [current_password, new_password]
+              properties:
+                current_password: {type: string, format: password}
+                new_password: {type: string, format: password, minLength: 12}
+      responses:
+        "200": {description: Updated}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/seller/apply:
+    post:
+      tags: [Auth]
+      summary: Buyer applies to become a Seller (stays Unverified until an Admin verifies)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/csrf"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [store_name]
+              properties: {store_name: {type: string, example: "Eve's Electronics"}}
+      responses:
+        "201": {description: Seller role added (unverified)}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  # ------------------------------------------------------------- buyer --
+  /api/coupons/validate:
+    post:
+      tags: [Buyer]
+      summary: Preview the server-computed total with an optional coupon (changes nothing). Rate limited.
+      description: ABAC P3 (no self-dealing). Unknown/expired/used coupons all return the same generic 422 message.
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/csrf"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [items]
+              properties:
+                items: {type: array, minItems: 1, maxItems: 20, items: {$ref: "#/components/schemas/CartItem"}}
+                coupon_code: {type: string, example: WELCOME10}
+      responses:
+        "200":
+          description: Quote
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  quote:
+                    type: object
+                    properties:
+                      subtotal_cents: {type: integer}
+                      discount_cents: {type: integer}
+                      total_cents: {type: integer}
+                      currency: {type: string}
+                      coupon_code: {type: string, nullable: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Quantity exceeds stock}
+        "422": {description: Coupon not valid for this order}
+        "429": {$ref: "#/components/responses/TooMany"}
+  /api/checkout:
+    post:
+      tags: [Buyer]
+      summary: Check out and pay (Buyer, ABAC P3). Rate limited.
+      description: |
+        The client sends ONLY product ids, quantities, shipping address, optional coupon code, test card label
+        and an idempotency key. The server computes prices/discount/total, charges the gateway, verifies the
+        signed response (signature, amount, currency, idempotency key) and records the order as **paid** or **failed**.
+        Re-sending the same idempotency key returns the original order (no second charge).
+        Card labels: `TEST-APPROVE`, `TEST-DECLINE`.
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/csrf"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [items, shipping_address, card_label, idempotency_key]
+              properties:
+                items: {type: array, minItems: 1, maxItems: 20, items: {$ref: "#/components/schemas/CartItem"}}
+                shipping_address: {type: string, minLength: 5, maxLength: 300, example: "Bliss Street, Beirut"}
+                coupon_code: {type: string, example: SAVE5}
+                card_label: {type: string, enum: [TEST-APPROVE, TEST-DECLINE]}
+                idempotency_key: {type: string, minLength: 16, maxLength: 64, example: 3f6c1e1a-1b7e-4a8e-9c1d-2b7f3e9d0a11}
+      responses:
+        "201": {description: Order created as paid, content: {application/json: {schema: {type: object, properties: {order: {$ref: "#/components/schemas/Order"}, idempotent_replay: {type: boolean}}}}}}
+        "200": {description: Idempotent replay - original order returned, nothing charged}
+        "402": {description: Payment declined / not verified - order recorded as failed (stock and coupon unchanged)}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Product not available (missing or draft)}
+        "409": {description: Insufficient stock, or idempotency key conflict / in progress}
+        "422": {description: Coupon not valid for this order}
+        "429": {$ref: "#/components/responses/TooMany"}
+  /api/orders:
+    get:
+      tags: [Buyer]
+      summary: My orders (P1 ownership)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters:
+        - {in: query, name: status, schema: {type: string, enum: [paid, failed, shipped, delivered]}}
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200": {description: Orders of the current buyer, content: {application/json: {schema: {type: object, properties: {orders: {type: array, items: {$ref: "#/components/schemas/Order"}}}}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/orders/{order_id}:
+    get:
+      tags: [Buyer]
+      summary: One of my orders (P1 ownership)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/orderId"}]
+      responses:
+        "200": {description: Order, content: {application/json: {schema: {type: object, properties: {order: {$ref: "#/components/schemas/Order"}}}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/orders/{order_id}/confirm-delivery:
+    post:
+      tags: [Buyer]
+      summary: Confirm delivery (P1 ownership + P4 shipped -> delivered)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/orderId"}, {$ref: "#/components/parameters/csrf"}]
+      responses:
+        "200": {description: Order now delivered}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  # ------------------------------------------------------------ seller --
+  /api/seller/products:
+    get:
+      tags: [Seller]
+      summary: My products (P1)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters:
+        - {in: query, name: status, schema: {type: string, enum: [draft, published]}}
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200": {description: Products, content: {application/json: {schema: {type: object, properties: {products: {type: array, items: {$ref: "#/components/schemas/Product"}}}}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Seller]
+      summary: Create a product (P1 + P2 - only verified sellers may create it as published)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/csrf"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, price, stock]
+              properties:
+                name: {type: string, example: Bluetooth Speaker}
+                description: {type: string}
+                price: {type: string, example: "39.99", description: "USD, max 2 decimals, >= 0"}
+                stock: {type: integer, minimum: 0}
+                status: {type: string, enum: [draft, published], default: draft}
+      responses:
+        "201": {description: Created}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/seller/products/{product_id}:
+    get:
+      tags: [Seller]
+      summary: One of my products (P1)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/productId"}]
+      responses:
+        "200": {description: Product}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [Seller]
+      summary: Update name/description/price/stock of my product (P1). Status is not editable here.
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/productId"}, {$ref: "#/components/parameters/csrf"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: {type: string}
+                description: {type: string}
+                price: {type: string, example: "29.99"}
+                stock: {type: integer, minimum: 0}
+      responses:
+        "200": {description: Updated}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/seller/products/{product_id}/publish:
+    post:
+      tags: [Seller]
+      summary: Publish my product (P1 + P2 verified sellers only)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/productId"}, {$ref: "#/components/parameters/csrf"}]
+      responses:
+        "200": {description: Published}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/seller/products/{product_id}/unpublish:
+    post:
+      tags: [Seller]
+      summary: Move my product back to draft (P1)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/productId"}, {$ref: "#/components/parameters/csrf"}]
+      responses:
+        "200": {description: Draft}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/seller/orders:
+    get:
+      tags: [Seller]
+      summary: Orders for my products (P1)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters:
+        - {in: query, name: status, schema: {type: string, enum: [paid, failed, shipped, delivered]}}
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200": {description: Orders, content: {application/json: {schema: {type: object, properties: {orders: {type: array, items: {$ref: "#/components/schemas/Order"}}}}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/seller/orders/{order_id}:
+    get:
+      tags: [Seller]
+      summary: One order for my products (P1)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/orderId"}]
+      responses:
+        "200": {description: Order}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/seller/orders/{order_id}/ship:
+    post:
+      tags: [Seller]
+      summary: Mark shipped with tracking number (P1 + P4 paid -> shipped)
+      security: [{bearerAuth: []}, {cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/orderId"}, {$ref: "#/components/parameters/csrf"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [tracking_number]
+              properties: {tracking_number: {type: string, pattern: "^[A-Za-z0-9-]{6,64}$", example: LBX123456789}}
+      responses:
+        "200": {description: Shipped}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  # ----------------------------------------------------------- finance --
+  /api/finance/coupons:
+    get:
+      tags: [Finance Officer]
+      summary: List coupons
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/page"}, {$ref: "#/components/parameters/per_page"}]
+      responses:
+        "200": {description: Coupons, content: {application/json: {schema: {type: object, properties: {coupons: {type: array, items: {$ref: "#/components/schemas/Coupon"}}}}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Finance Officer]
+      summary: Create a platform coupon
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, type, valid_from, valid_until, max_uses]
+              properties:
+                code: {type: string, pattern: "^[A-Za-z0-9-]{3,32}$", example: SPRING25}
+                type: {type: string, enum: [percentage, fixed]}
+                percent: {type: string, example: "25", description: "percentage coupons: (0, 100], max 2 decimals"}
+                amount: {type: string, example: "5.00", description: "fixed coupons: USD > 0"}
+                valid_from: {type: string, format: date-time, example: "2026-01-01T00:00:00Z"}
+                valid_until: {type: string, format: date-time, example: "2027-01-01T00:00:00Z"}
+                max_uses: {type: integer, minimum: 1, example: 100, description: Across all buyers; each buyer can use a coupon once}
+      responses:
+        "201": {description: Created}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/finance/payments:
+    get:
+      tags: [Finance Officer]
+      summary: View all payments
+      security: [{bearerAuth: []}]
+      parameters:
+        - {in: query, name: outcome, schema: {type: string, enum: [approved, declined, rejected]}}
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200": {description: Payments, content: {application/json: {schema: {type: object, properties: {payments: {type: array, items: {$ref: "#/components/schemas/Payment"}}}}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  # ------------------------------------------------------------- admin --
+  /api/admin/change-credentials:
+    post:
+      tags: [Admin]
+      summary: Change the default admin email and password (required before anything else)
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [current_password, new_email, new_password]
+              properties:
+                current_password: {type: string, format: password, example: "ChangeMe#Default2026"}
+                new_email: {type: string, example: root@marketplace.local}
+                new_password: {type: string, format: password, example: "N3w!Admin-Secret"}
+      responses:
+        "200": {description: Changed}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/admin/sellers:
+    get:
+      tags: [Admin]
+      summary: List seller applications
+      security: [{bearerAuth: []}]
+      parameters:
+        - {in: query, name: status, schema: {type: string, enum: [unverified, verified]}}
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200": {description: Sellers}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/admin/sellers/{user_id}/verify:
+    post:
+      tags: [Admin]
+      summary: Verify a seller
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/userId"}]
+      responses:
+        "200": {description: Verified}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/admin/users:
+    get:
+      tags: [Admin]
+      summary: List accounts
+      security: [{bearerAuth: []}]
+      parameters:
+        - {in: query, name: status, schema: {type: string, enum: [active, suspended]}}
+        - {in: query, name: role, schema: {type: string, enum: [buyer, seller, finance_officer, admin]}}
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200": {description: Users, content: {application/json: {schema: {type: object, properties: {users: {type: array, items: {$ref: "#/components/schemas/User"}}}}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/admin/users/{user_id}/suspend:
+    post:
+      tags: [Admin]
+      summary: Suspend an account (all its sessions stop working immediately; not allowed on self)
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/userId"}]
+      responses:
+        "200": {description: Suspended}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/admin/users/{user_id}/reactivate:
+    post:
+      tags: [Admin]
+      summary: Reactivate an account
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/userId"}]
+      responses:
+        "200": {description: Reactivated}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  # --------------------------------------------------------- web pages --
+  /:
+    get: {tags: [Web pages], summary: Browse page, responses: {"200": {description: HTML}}}
+  /login:
+    get: {tags: [Web pages], summary: Login page, responses: {"200": {description: HTML}}}
+  /register:
+    get: {tags: [Web pages], summary: Registration page, responses: {"200": {description: HTML}}}
+  /cart:
+    get: {tags: [Web pages], summary: Cart & checkout page, responses: {"200": {description: HTML}}}
+  /orders:
+    get: {tags: [Web pages], summary: Buyer orders page, responses: {"200": {description: HTML}}}
+  /seller:
+    get: {tags: [Web pages], summary: Seller dashboard page, responses: {"200": {description: HTML}}}
+  /account:
+    get: {tags: [Web pages], summary: Account page, responses: {"200": {description: HTML}}}
+  /api/docs:
+    get: {tags: [Web pages], summary: This Swagger UI, responses: {"200": {description: HTML}}}
+  /api/openapi.yaml:
+    get: {tags: [Web pages], summary: This OpenAPI document, responses: {"200": {description: YAML}}}
+  /api/docs/assets/{name}:
+    get:
+      tags: [Web pages]
+      summary: Swagger UI static assets (allow-listed file names)
+      parameters: [{in: path, name: name, required: true, schema: {type: string}}]
+      responses: {"200": {description: Asset}, "404": {description: Not found}}
+  /static/{path}:
+    get:
+      tags: [Web pages]
+      summary: Frontend static files (CSS/JS)
+      parameters: [{in: path, name: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: File}, "404": {description: Not found}}

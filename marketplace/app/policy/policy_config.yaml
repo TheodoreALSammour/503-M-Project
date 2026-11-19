@@ -1,0 +1,123 @@
+# ---------------------------------------------------------------------------
+# Access-control configuration. Changing this file changes the authorization
+# behaviour WITHOUT changing application code (restart required).
+#
+# permissions: action -> {role: OK | C}. Any role not listed is X (denied).
+#   OK = allowed by role (no ABAC evaluation)
+#   C  = allowed by role only if the ABAC policies listed under `abac` permit
+#        the specific request.
+#   `anonymous` is the pseudo-role of visitors who are not logged in.
+#
+# abac: action -> list of policies (with optional parameters).
+#   Combining: deny-overrides, default deny (at least one policy must PERMIT
+#   and none may DENY). Errors while evaluating a policy => DENY (fail closed).
+#
+# global_policies are evaluated before RBAC for every authenticated request.
+# ---------------------------------------------------------------------------
+version: 1
+
+roles: [anonymous, buyer, seller, finance_officer, admin]
+
+global_policies: [ACCOUNT_ACTIVE, CREDENTIALS_CHANGE_REQUIRED]
+
+# Actions an account that must still change its default credentials may use.
+credential_change_exempt_actions:
+  - static.read
+  - page.view
+  - docs.view
+  - catalog.browse
+  - catalog.view
+  - auth.login
+  - auth.logout
+  - auth.me
+  - admin.change_credentials
+
+permissions:
+  # ---- public / infrastructure -------------------------------------------
+  static.read:      {anonymous: OK, buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+  page.view:        {anonymous: OK, buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+  docs.view:        {anonymous: OK, buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+  catalog.browse:   {anonymous: OK, buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+  catalog.view:     {anonymous: OK, buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+
+  # ---- self-register (as Buyer, then apply as Seller) ----------------------
+  auth.register:    {anonymous: OK}
+  seller.apply:     {buyer: OK}
+
+  # ---- login / update own password ----------------------------------------
+  auth.login:       {anonymous: OK, buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+  auth.logout:      {buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+  auth.me:          {buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+  account.update_password: {buyer: OK, seller: OK, finance_officer: OK, admin: OK}
+  admin.change_credentials: {admin: OK}
+
+  # ---- check out and pay ---------------------------------------------------
+  coupon.validate:  {buyer: C}
+  checkout.pay:     {buyer: C}
+
+  # ---- view or confirm delivery of own orders ------------------------------
+  order.list_own:         {buyer: C}
+  order.view_own:         {buyer: C}
+  order.confirm_delivery: {buyer: C}
+
+  # ---- manage own products -------------------------------------------------
+  product.list_own:  {seller: C}
+  product.view_own:  {seller: C}
+  product.create:    {seller: C}
+  product.update:    {seller: C}
+  product.publish:   {seller: C}
+  product.unpublish: {seller: C}
+
+  # ---- view orders for own products / mark shipped -------------------------
+  seller_order.list: {seller: C}
+  seller_order.view: {seller: C}
+  seller_order.ship: {seller: C}
+
+  # ---- finance officer -----------------------------------------------------
+  coupon.create:     {finance_officer: OK}
+  coupon.list:       {finance_officer: OK}
+  payment.list_all:  {finance_officer: OK}
+
+  # ---- admin ---------------------------------------------------------------
+  seller.list:       {admin: OK}
+  seller.verify:     {admin: OK}
+  account.list:      {admin: OK}
+  account.suspend:   {admin: OK}
+  account.reactivate: {admin: OK}
+
+abac:
+  coupon.validate:
+    - {policy: P3_NO_SELF_DEALING}
+  checkout.pay:
+    - {policy: P3_NO_SELF_DEALING}
+
+  order.list_own:
+    - {policy: P1_OWNERSHIP, as: buyer}
+  order.view_own:
+    - {policy: P1_OWNERSHIP, as: buyer}
+  order.confirm_delivery:
+    - {policy: P1_OWNERSHIP, as: buyer}
+    - {policy: P4_ORDER_STATE, to: delivered, trigger: buyer}
+
+  product.list_own:
+    - {policy: P1_OWNERSHIP, as: seller}
+  product.view_own:
+    - {policy: P1_OWNERSHIP, as: seller}
+  product.create:
+    - {policy: P1_OWNERSHIP, as: seller}
+    - {policy: P2_SELLER_VERIFICATION}
+  product.update:
+    - {policy: P1_OWNERSHIP, as: seller}
+  product.publish:
+    - {policy: P1_OWNERSHIP, as: seller}
+    - {policy: P2_SELLER_VERIFICATION}
+  product.unpublish:
+    - {policy: P1_OWNERSHIP, as: seller}
+
+  seller_order.list:
+    - {policy: P1_OWNERSHIP, as: seller}
+  seller_order.view:
+    - {policy: P1_OWNERSHIP, as: seller}
+  seller_order.ship:
+    - {policy: P1_OWNERSHIP, as: seller}
+    - {policy: P4_ORDER_STATE, to: shipped, trigger: seller}
