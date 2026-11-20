@@ -11,7 +11,8 @@ from . import arg_choice, paginate
 
 bp = Blueprint("buyer", __name__, url_prefix="/api")
 
-CHECKOUT_FIELDS = {"items", "shipping_address", "coupon_code", "card_label", "idempotency_key"}
+CHECKOUT_FIELDS = {"items", "shipping_address", "coupon_code", "card_label", "idempotency_key",
+                   "expected_total_cents"}
 
 
 def _load_cart_for_quote(**_kw):

@@ -59,3 +59,16 @@ def test_checkout_limited(limited):
     h = {"Authorization": "Bearer " + tok.get_json()["access_token"]}
     codes = [c.post("/api/checkout", headers=h, json=checkout_body([(999999, 1)])).status_code for _ in range(5)]
     assert codes[-1] == 429
+
+
+def test_attacker_cannot_lock_victim_out_from_another_ip(limited):
+    """F3: failed logins from the attacker's IP must not lock the victim out of their own IP."""
+    c = limited.test_client()
+    attacker = {"REMOTE_ADDR": "203.0.113.66"}
+    victim = {"REMOTE_ADDR": "198.51.100.7"}
+    codes = [c.post("/api/auth/login", json={"email": "alice@example.com", "password": f"guess-{i}"},
+                    environ_base=attacker).status_code for i in range(5)]
+    assert codes[-1] == 429  # the attacker is still throttled
+    r = c.post("/api/auth/login", json={"email": "alice@example.com", "password": PASSWORDS["alice@example.com"]},
+               environ_base=victim)
+    assert r.status_code == 200
