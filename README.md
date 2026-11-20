@@ -217,18 +217,3 @@ marketplace/
 Edit `marketplace/app/policy/policy_config.yaml` (permission matrix + which ABAC policies apply
 to which action) and restart the `marketplace` service. A malformed configuration is refused at
 start-up (fail closed).
-
----
-
-## 7. Team contributions
-
-| Member | Contribution |
-|---|---|
-| _Name 1_ | _e.g. policy module (RBAC/ABAC engine, config, decorator) and its tests_ |
-| _Name 2_ | _e.g. checkout, coupons, money handling, race-condition handling_ |
-| _Name 3_ | _e.g. payment gateway simulator and signed channel_ |
-| _Name 4_ | _e.g. authentication, sessions, admin/finance APIs, logging_ |
-| _Name 5_ | _e.g. frontend, OpenAPI documentation, Docker Compose_ |
-| _Name 6_ | _e.g. threat model, security document, attack scripts_ |
-
-_Every member must be able to explain any part of the code during the interview._
