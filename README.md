@@ -10,11 +10,15 @@ The security document (threat model + traceability) is in **[docs/SECURITY.md](d
 
 ## 1. Quick start (one command)
 
-Requirements: Docker Desktop (with Docker Compose v2).
+Requirements: Docker Desktop (with Docker Compose v2), running.
 
 ```bash
+git clone https://github.com/TheodoreALSammour/503-M-Project.git
+cd 503-M-Project
 docker compose up --build
 ```
+
+Wait for `Listening at: http://0.0.0.0:8000` in the output, then open the URLs below.
 
 | What | URL |
 |---|---|
@@ -140,13 +144,22 @@ Example authorization log line:
 
 ## 5. Tests
 
-```bash
-python -m venv .venv
-.venv/Scripts/pip install -r marketplace/requirements.txt -r gateway/requirements.txt pytest   # Windows
-# source .venv/bin/activate && pip install ...                                                    # Linux/macOS
+Run from the project root (Docker is not needed for these):
 
-cd marketplace && ../.venv/Scripts/python -m pytest -q       # 135 tests
-cd ../gateway  && ../.venv/Scripts/python -m pytest -q       # 13 tests
+**Windows (PowerShell)**
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r marketplace\requirements.txt -r gateway\requirements.txt pytest
+cd marketplace; ..\.venv\Scripts\python -m pytest -q; cd ..   # 135 tests (~3.5 min)
+cd gateway; ..\.venv\Scripts\python -m pytest -q; cd ..       # 13 tests
+```
+
+**Linux / macOS**
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r marketplace/requirements.txt -r gateway/requirements.txt pytest
+(cd marketplace && ../.venv/bin/python -m pytest -q)   # 135 tests (~3.5 min)
+(cd gateway && ../.venv/bin/python -m pytest -q)       # 13 tests
 ```
 
 | Test file | Covers |
@@ -160,11 +173,14 @@ cd ../gateway  && ../.venv/Scripts/python -m pytest -q       # 13 tests
 
 ### Live attack script (against the running Docker stack, PostgreSQL row locks, 3 workers)
 
+With the system running (`docker compose up`), in a second terminal:
+
 ```bash
-python scripts/attack_demo.py        # standard library only; re-runnable
+python scripts/attack_demo.py        # standard library only; wait ~1 min between runs (rate limits)
 ```
 It runs real concurrent requests (last item race, last coupon use race, parallel duplicate
 idempotency keys) plus tampering/IDOR/workflow attacks, and prints `13/13 attacks blocked`.
+Each run adds test products and buyers; reset with `docker compose down -v` before a demo.
 
 ---
 
@@ -216,5 +232,3 @@ start-up (fail closed).
 | _Name 6_ | _e.g. threat model, security document, attack scripts_ |
 
 _Every member must be able to explain any part of the code during the interview._
-#   5 0 3 - M - P r o j e c t  
- 
