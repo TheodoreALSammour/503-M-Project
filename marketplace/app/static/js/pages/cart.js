@@ -5,6 +5,9 @@ const app = document.getElementById("app");
 // same request can never charge twice. A new key is drawn after a result.
 let idempotencyKey = newIdempotencyKey();
 let appliedCoupon = null;
+// Total last shown to the buyer (from the SERVER quote). Sent with the checkout
+// only as a confirmation: the server refuses the charge if its own total differs.
+let shownTotalCents = null;
 
 function itemsPayload() {
   return cart.get().map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
@@ -12,6 +15,7 @@ function itemsPayload() {
 
 async function refreshQuote() {
   const box = document.getElementById("quote");
+  shownTotalCents = null;
   if (!cart.get().length) return box.replaceChildren();
   const body = { items: itemsPayload() };
   if (appliedCoupon) body.coupon_code = appliedCoupon;
@@ -22,7 +26,9 @@ async function refreshQuote() {
     return;
   }
   const q = r.data.quote;
-  // Totals shown here come from the SERVER; the checkout request does not send them.
+  shownTotalCents = q.total_cents;
+  // Totals shown here come from the SERVER. The checkout echoes total_cents back
+  // as expected_total_cents, which the server only compares, never uses for pricing.
   box.replaceChildren(el("table", { class: "totals" },
     el("tr", {}, el("td", { text: "Subtotal" }), el("td", { text: money(q.subtotal_cents) })),
     q.coupon_code ? el("tr", {}, el("td", { text: `Coupon ${q.coupon_code}` }), el("td", { text: "−" + money(q.discount_cents) })) : null,
@@ -73,6 +79,7 @@ function renderItems() {
     const body = { items: itemsPayload(), shipping_address: address.value, card_label: card.value,
                    idempotency_key: idempotencyKey };
     if (appliedCoupon) body.coupon_code = appliedCoupon;
+    if (Number.isInteger(shownTotalCents)) body.expected_total_cents = shownTotalCents;
     const r = await api("POST", "/api/checkout", body);
     pay.disabled = false;
     const order = r.data.order;
@@ -86,6 +93,7 @@ function renderItems() {
     } else {
       if (r.status !== 409) idempotencyKey = newIdempotencyKey();
       flash(errorMessage(r), "error");
+      if (r.status === 409) refreshQuote(); // e.g. the price changed: show the new total before retrying
     }
   });
 

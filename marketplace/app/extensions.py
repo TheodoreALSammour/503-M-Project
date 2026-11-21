@@ -18,10 +18,17 @@ def user_or_ip_key():
 
 
 def login_account_key():
+    """Per-account login limit, keyed on (email, client IP).
+
+    Keying on the email alone let anyone lock a victim (including the admin)
+    out for up to an hour just by sending a few wrong passwords for their
+    email. With (email, IP) the attacker only throttles their own IP; the
+    victim can still log in from theirs. Brute force from one IP is still
+    capped by this limit and by the separate per-IP limit."""
     body = request.get_json(silent=True)
     email = body.get("email") if isinstance(body, dict) else None
     if isinstance(email, str):
-        return "login-account:" + email.strip().lower()[:254]
+        return f"login-account:{email.strip().lower()[:254]}|{client_ip()}"
     return f"login-account-ip:{client_ip()}"
 
 

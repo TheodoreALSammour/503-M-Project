@@ -39,11 +39,12 @@ from . import coupons, state_machine
 from .audit import audit
 from .extensions import db
 from .gateway_client import get_client
-from .models import IdempotencyRecord, Order, OrderItem, Payment, Product, ProductStatus
+from .models import AccountStatus, IdempotencyRecord, Order, OrderItem, Payment, Product, ProductStatus
 from .validation import (CARD_LABEL_RE, IDEMPOTENCY_KEY_RE, ValidationError, as_int, get_str)
 
 MAX_LINES = 20
 MAX_QTY = 1000
+MAX_EXPECTED_TOTAL_CENTS = 10**12
 _sqlite_lock = threading.Lock()
 
 
@@ -61,6 +62,10 @@ class CheckoutRequest:
     coupon_code: str | None
     card_label: str | None
     idempotency_key: str | None
+    # Optional: the total the buyer was shown. Used ONLY to refuse the charge
+    # when the server total differs (e.g. the seller changed the price after
+    # the preview). It never influences what is charged.
+    expected_total_cents: int | None = None
 
     @property
     def product_ids(self):
@@ -92,12 +97,16 @@ def parse_checkout(body, *, full=True):
         raise ValidationError("Malformed coupon code.", field="coupon_code")
     if not full:
         return CheckoutRequest(items, None, code, None, None)
+    expected = body.get("expected_total_cents")
+    if expected is not None:
+        expected = as_int(expected, "expected_total_cents", min_value=0, max_value=MAX_EXPECTED_TOTAL_CENTS)
     return CheckoutRequest(
         items=items,
         shipping_address=get_str(body, "shipping_address", min_len=5, max_len=300),
         coupon_code=code,
         card_label=get_str(body, "card_label", min_len=1, max_len=32, pattern=CARD_LABEL_RE),
         idempotency_key=get_str(body, "idempotency_key", min_len=16, max_len=64, pattern=IDEMPOTENCY_KEY_RE),
+        expected_total_cents=expected,
     )
 
 
@@ -119,14 +128,21 @@ def load_products(ids, *, lock=False):
     return q.all()
 
 
+def seller_is_active(product):
+    """A suspended seller's products cannot be bought (money must not flow to
+    a suspended account that cannot even log in to ship the order)."""
+    return product.seller is not None and product.seller.status == AccountStatus.ACTIVE
+
+
 def _price_lines(req, products, buyer_id):
     """Validate the cart against DB state and compute the subtotal."""
     by_id = {p.id: p for p in products}
     lines, subtotal, sellers = [], 0, set()
     for pid, qty in req.items:
         p = by_id.get(pid)
-        if p is None or p.status != ProductStatus.PUBLISHED:
-            # Drafts are invisible to buyers: same message as non-existent.
+        if p is None or p.status != ProductStatus.PUBLISHED or not seller_is_active(p):
+            # Drafts and products of suspended sellers are invisible to buyers:
+            # same message as non-existent.
             raise CheckoutError(f"Product {pid} is not available.", 404)
         sellers.add(p.seller_id)
         if qty > p.stock:
@@ -237,6 +253,12 @@ def _locked_checkout(buyer, req, fp, claim_id, state):
     total = subtotal - discount
     if total < 0 or discount < 0:  # cannot happen - defensive
         raise CheckoutError("Invalid total.")
+    if req.expected_total_cents is not None and req.expected_total_cents != total:
+        # Checked BEFORE charging: nothing is charged and the key is freed.
+        audit("checkout.total_changed", buyer_id=buyer.id, expected_cents=req.expected_total_cents,
+              actual_cents=total)
+        raise CheckoutError("The total has changed since you last checked it. "
+                            "Review your cart and try again.", 409)
     currency = "USD"
     gateway_key = f"mp-{buyer.id}-{req.idempotency_key}"
 

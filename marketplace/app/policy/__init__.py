@@ -29,6 +29,11 @@ def check(action, resource=None):
     decision = engine().authorize(subject, action, resource)
     if not decision.allowed:
         g.authz_denied = decision
+        if decision.policy == "P1_OWNERSHIP" and not subject.is_anonymous:
+            # Someone else's order/product: answer exactly like a non-existent
+            # one, so IDs cannot be enumerated (403 vs 404). The deny is still
+            # logged with P1 as the deciding policy.
+            abort(404)
         abort(401 if subject.is_anonymous else 403)
     return decision
 

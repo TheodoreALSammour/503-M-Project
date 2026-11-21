@@ -325,3 +325,76 @@ def test_concurrent_last_coupon_use(app, auth):
     [t.join() for t in threads]
     assert sorted(results) == [201, 422], results
     assert _coupon(app, "SINGLEUSE50") == (1, 1)
+
+
+# --------------------------------------------------------------------------
+# Pentest regressions (pentest/FINDINGS.md)
+# --------------------------------------------------------------------------
+def _set_status(app, email, status):
+    from app.models import User
+    with app.app_context():
+        User.query.filter_by(email=email).one().status = status
+        db.session.commit()
+
+
+def test_cannot_buy_from_suspended_seller(app, client, auth):
+    """F1: suspending a seller must stop money flowing to them."""
+    pid = product_id(app, "Wireless Mouse")  # Sam's product
+    alice = auth("alice@example.com")
+    _set_status(app, "sam@example.com", "suspended")
+    r = client.post("/api/checkout", json=checkout_body([(pid, 1)]), headers=alice)
+    assert r.status_code == 404
+    r = client.post("/api/coupons/validate", json={"items": [{"product_id": pid, "quantity": 1}]}, headers=alice)
+    assert r.status_code == 404
+    assert _stock(app, pid) == 50
+    with app.app_context():
+        assert Order.query.count() == 0
+
+
+def test_suspended_sellers_products_hidden_from_catalog(app, client):
+    pid = product_id(app, "Wireless Mouse")
+    assert client.get(f"/api/products/{pid}").status_code == 200
+    _set_status(app, "sam@example.com", "suspended")
+    assert client.get(f"/api/products/{pid}").status_code == 404
+    names = [p["name"] for p in client.get("/api/products?per_page=100").get_json()["products"]]
+    assert "Wireless Mouse" not in names and "Security Engineering (book)" in names  # Vera's still listed
+    _set_status(app, "sam@example.com", "active")
+    assert client.get(f"/api/products/{pid}").status_code == 200
+
+
+def test_price_change_after_quote_is_not_charged(app, client, auth, transport):
+    """F2: the buyer is never charged a total different from the one they were shown."""
+    pid = product_id(app, "Wireless Mouse")
+    alice = auth("alice@example.com")
+    shown = client.post("/api/coupons/validate", json={"items": [{"product_id": pid, "quantity": 1}]},
+                        headers=alice).get_json()["quote"]["total_cents"]
+    r = client.patch(f"/api/seller/products/{pid}", json={"price": "999.00"}, headers=auth("sam@example.com"))
+    assert r.status_code == 200
+    calls = transport.calls
+    key = "price-change-key-0001"
+    r = client.post("/api/checkout", json=checkout_body([(pid, 1)], key=key, expected_total_cents=shown),
+                    headers=alice)
+    assert r.status_code == 409
+    assert transport.calls == calls  # the gateway was never called
+    assert _stock(app, pid) == 50
+    # after re-checking, the buyer can confirm the new total with the SAME key
+    r = client.post("/api/checkout", json=checkout_body([(pid, 1)], key=key, expected_total_cents=99900),
+                    headers=alice)
+    assert r.status_code == 201 and r.get_json()["order"]["total_cents"] == 99900
+
+
+def test_expected_total_never_used_for_pricing(app, client, auth):
+    pid = product_id(app, "Wireless Mouse")
+    alice = auth("alice@example.com")
+    r = client.post("/api/checkout", json=checkout_body([(pid, 1)], expected_total_cents=1), headers=alice)
+    assert r.status_code == 409  # a lower "expected" total is refused, never charged
+    r = client.post("/api/checkout", json=checkout_body([(pid, 1)], expected_total_cents=2499), headers=alice)
+    assert r.status_code == 201 and r.get_json()["order"]["total_cents"] == 2499
+
+
+@pytest.mark.parametrize("bad", [-1, 1.5, "2499", True, 10**13])
+def test_expected_total_validation(app, client, auth, bad):
+    pid = product_id(app, "Wireless Mouse")
+    r = client.post("/api/checkout", json=checkout_body([(pid, 1)], expected_total_cents=bad),
+                    headers=auth("alice@example.com"))
+    assert r.status_code == 400

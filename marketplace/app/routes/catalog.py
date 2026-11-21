@@ -2,7 +2,7 @@
 from flask import Blueprint, abort, jsonify, request
 
 from ..extensions import db
-from ..models import Product, ProductStatus
+from ..models import AccountStatus, Product, ProductStatus, User
 from ..policy import authorize, is_allowed
 from ..validation import ValidationError
 from . import paginate
@@ -20,7 +20,9 @@ def list_products():
     q = request.args.get("q", "").strip()
     if len(q) > 100:
         raise ValidationError("Search term too long.", field="q")
-    query = Product.query.filter(Product.status == ProductStatus.PUBLISHED)
+    # Products of suspended sellers are hidden (they cannot be bought either).
+    query = Product.query.filter(Product.status == ProductStatus.PUBLISHED,
+                                 Product.seller.has(User.status == AccountStatus.ACTIVE))
     if q:
         # Parameterised LIKE via the ORM (no SQL injection); wildcards escaped.
         pattern = f"%{_escape_like(q)}%"
@@ -43,4 +45,6 @@ def get_product(product_id):
         if not is_allowed("product.view_own", p):
             abort(404)
         return jsonify(product=p.to_public(include_private=True))
+    if p.seller is None or p.seller.status != AccountStatus.ACTIVE:
+        abort(404)  # seller suspended: hidden like a non-existent product
     return jsonify(product=p.to_public())

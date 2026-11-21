@@ -367,6 +367,13 @@ paths:
                 coupon_code: {type: string, example: SAVE5}
                 card_label: {type: string, enum: [TEST-APPROVE, TEST-DECLINE]}
                 idempotency_key: {type: string, minLength: 16, maxLength: 64, example: 3f6c1e1a-1b7e-4a8e-9c1d-2b7f3e9d0a11}
+                expected_total_cents:
+                  type: integer
+                  minimum: 0
+                  description: >-
+                    Optional. The total (in cents) the buyer was shown by `/api/coupons/validate`. It is never
+                    used to compute the price; if it differs from the server total the request is refused
+                    with 409 before anything is charged.
       responses:
         "201": {description: Order created as paid, content: {application/json: {schema: {type: object, properties: {order: {$ref: "#/components/schemas/Order"}, idempotent_replay: {type: boolean}}}}}}
         "200": {description: Idempotent replay - original order returned, nothing charged}

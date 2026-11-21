@@ -41,7 +41,9 @@ def _parse_price(body, required):
             raise ValidationError("Field 'price' is required.", field="price")
         return None
     try:
-        return parse_amount_to_cents(body["price"])
+        # A product must cost at least $0.01: $0 listings would create "Paid"
+        # orders with no money involved (found by the live pentest).
+        return parse_amount_to_cents(body["price"], allow_zero=False)
     except MoneyError as exc:
         raise ValidationError(str(exc), field="price")
 
