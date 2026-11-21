@@ -217,3 +217,15 @@ marketplace/
 Edit `marketplace/app/policy/policy_config.yaml` (permission matrix + which ABAC policies apply
 to which action) and restart the `marketplace` service. A malformed configuration is refused at
 start-up (fail closed).
+
+---
+
+## 7. Team members and contributions
+
+| Member | Contribution |
+|---|---|
+| Theodore AL Sammour | _TODO: fill in areas / files owned_ |
+| marwadeeb | Security testing: live black-box attack suite against the running Docker stack (business logic, races, access control, auth, rate limits); found and fixed buying from suspended sellers, price changes between preview and payment, login lockout DoS, order/product ID enumeration and $0 products; regression tests and threat-model updates (T04, T25, T26, T30, T50b) |
+| _TODO_ | _TODO_ |
+| _TODO_ | _TODO_ |
+| _TODO_ | _TODO_ |

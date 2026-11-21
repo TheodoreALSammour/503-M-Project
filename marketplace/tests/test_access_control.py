@@ -250,9 +250,11 @@ def test_seller_cannot_set_status_via_update(app, client, auth):
 def test_seller_cannot_touch_other_sellers_products(app, client, auth):
     pid = product_id(app, "Wireless Mouse")  # Sam's
     vera = auth("vera@example.com")
-    assert client.patch(f"/api/seller/products/{pid}", headers=vera, json={"price": "0.01"}).status_code == 403
-    assert client.post(f"/api/seller/products/{pid}/unpublish", headers=vera).status_code == 403
-    assert client.get(f"/api/seller/products/{pid}", headers=vera).status_code == 403
+    # P1 denials answer 404 (same as a non-existent product) so IDs cannot be enumerated
+    assert client.patch(f"/api/seller/products/{pid}", headers=vera, json={"price": "0.01"}).status_code == 404
+    assert client.post(f"/api/seller/products/{pid}/unpublish", headers=vera).status_code == 404
+    assert client.get(f"/api/seller/products/{pid}", headers=vera).status_code == 404
+    assert client.get("/api/seller/products/987654", headers=vera).status_code == 404
 
 
 def test_seller_cannot_spoof_owner(app, client, auth):
@@ -261,7 +263,7 @@ def test_seller_cannot_spoof_owner(app, client, auth):
     assert r.status_code == 400
 
 
-@pytest.mark.parametrize("price", ["-1.00", "1.001", "NaN", "Infinity", "abc", True, None, [1]])
+@pytest.mark.parametrize("price", ["-1.00", "1.001", "NaN", "Infinity", "abc", True, None, [1], "0", "0.00", 0])
 def test_product_price_validation(client, auth, price):
     r = client.post("/api/seller/products", headers=auth("sam@example.com"),
                     json={"name": "Thing", "price": price, "stock": 1})
@@ -289,7 +291,9 @@ def _paid_order(app, client, buyer_h):
 def test_order_idor_between_buyers(app, client, auth):
     oid = _paid_order(app, client, auth("alice@example.com"))
     assert client.get(f"/api/orders/{oid}", headers=auth("alice@example.com")).status_code == 200
-    assert client.get(f"/api/orders/{oid}", headers=auth("bob@example.com")).status_code == 403
+    # same answer as a non-existent order, so order IDs cannot be enumerated
+    assert client.get(f"/api/orders/{oid}", headers=auth("bob@example.com")).status_code == 404
+    assert client.get("/api/orders/987654", headers=auth("bob@example.com")).status_code == 404
     assert all(o["buyer_id"] != user_id(app, "alice@example.com")
                for o in client.get("/api/orders", headers=auth("bob@example.com")).get_json()["orders"])
 
@@ -303,9 +307,9 @@ def test_order_workflow_full(app, client, auth):
     # buyer cannot ship (RBAC)
     assert client.post(f"/api/seller/orders/{oid}/ship", headers=alice,
                        json={"tracking_number": "TRACK123456"}).status_code == 403
-    # another seller cannot ship (P1)
+    # another seller cannot ship (P1 -> 404, hidden like a non-existent order)
     assert client.post(f"/api/seller/orders/{oid}/ship", headers=vera,
-                       json={"tracking_number": "TRACK123456"}).status_code == 403
+                       json={"tracking_number": "TRACK123456"}).status_code == 404
     # tracking number required
     assert client.post(f"/api/seller/orders/{oid}/ship", headers=sam, json={}).status_code == 400
     r = client.post(f"/api/seller/orders/{oid}/ship", headers=sam, json={"tracking_number": "TRACK123456"})
@@ -313,8 +317,8 @@ def test_order_workflow_full(app, client, auth):
     # cannot ship twice (repeat a step)
     assert client.post(f"/api/seller/orders/{oid}/ship", headers=sam,
                        json={"tracking_number": "TRACK999999"}).status_code == 403
-    # other buyer cannot confirm
-    assert client.post(f"/api/orders/{oid}/confirm-delivery", headers=auth("bob@example.com")).status_code == 403
+    # other buyer cannot confirm (P1 -> 404)
+    assert client.post(f"/api/orders/{oid}/confirm-delivery", headers=auth("bob@example.com")).status_code == 404
     r = client.post(f"/api/orders/{oid}/confirm-delivery", headers=alice)
     assert r.status_code == 200 and r.get_json()["order"]["status"] == "delivered"
     assert client.post(f"/api/orders/{oid}/confirm-delivery", headers=alice).status_code == 403
