@@ -238,8 +238,13 @@ paths:
                   token_type: {type: string, example: Bearer}
                   expires_in: {type: integer}
                   csrf_token: {type: string}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: Account suspended}
+        "401":
+          description: >-
+            Invalid email or password. A suspended account gets this same reply whether or not
+            the password is correct, so the reply never confirms a password.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
         "429": {$ref: "#/components/responses/TooMany"}
   /api/auth/logout:
     post:

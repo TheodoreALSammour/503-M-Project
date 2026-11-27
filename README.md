@@ -64,7 +64,7 @@ To start again from a clean database: `docker compose down -v && docker compose 
 | Buyer + Seller (**Verified**) | `sam@example.com` | `Market#Seller2026` | store "Sam's Gadgets" |
 | Buyer + Seller (**Verified**) | `vera@example.com` | `Market#Seller2027` | store "Vera's Books" (for the one-seller-per-order rule) |
 | Buyer + Seller (**Unverified**) | `uma@example.com` | `Market#Seller2028` | store "Uma's Crafts": drafts only |
-| Buyer (**Suspended**) | `suspended@example.com` | `Market#Buyer2029` | cannot log in |
+| Buyer (**Suspended**) | `suspended@example.com` | `Market#Buyer2029` | cannot log in (gets the same "Invalid email or password" reply as a wrong password) |
 
 ### Seeded products
 
@@ -150,7 +150,7 @@ Run from the project root (Docker is not needed for these):
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r marketplace\requirements.txt -r gateway\requirements.txt pytest
-cd marketplace; ..\.venv\Scripts\python -m pytest -q; cd ..   # 135 tests (~3.5 min)
+cd marketplace; ..\.venv\Scripts\python -m pytest -q; cd ..   # 141 tests (~3.5 min)
 cd gateway; ..\.venv\Scripts\python -m pytest -q; cd ..       # 13 tests
 ```
 
@@ -158,13 +158,13 @@ cd gateway; ..\.venv\Scripts\python -m pytest -q; cd ..       # 13 tests
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r marketplace/requirements.txt -r gateway/requirements.txt pytest
-(cd marketplace && ../.venv/bin/python -m pytest -q)   # 135 tests (~3.5 min)
+(cd marketplace && ../.venv/bin/python -m pytest -q)   # 141 tests (~3.5 min)
 (cd gateway && ../.venv/bin/python -m pytest -q)       # 13 tests
 ```
 
 | Test file | Covers |
 |---|---|
-| `marketplace/tests/test_policy_engine.py` | **Authorization layer unit tests**: allow + deny for every policy (P1–P4, global policies), RBAC short-circuit, default deny, deny-overrides, fail-closed, config validation |
+| `marketplace/tests/test_policy_engine.py` | **Authorization layer unit tests**: allow + deny for every policy (P1–P4, SOD_NOT_SELF, global policies), RBAC short-circuit, default deny, deny-overrides, fail-closed, config validation |
 | `marketplace/tests/test_access_control.py` | HTTP-level access control: IDOR, visitors, SoD, admin first login, suspension kills sessions, CSRF, P2 publish flow, order workflow |
 | `marketplace/tests/test_checkout.py` | business-logic attacks: price tampering, quantities, stock, drafts, multi-seller carts, coupons, rounding, idempotency, forged/tampered/replayed gateway responses, races |
 | `marketplace/tests/test_rate_limits.py` | login, coupon validation, checkout rate limits |
@@ -197,7 +197,7 @@ gateway/                          # Payment Gateway Simulator (separate service 
 marketplace/
   app/policy/policy_config.yaml   # RBAC permission matrix + ABAC assignment (configuration)
   app/policy/engine.py            # central policy decision point
-  app/policy/policies.py          # P1–P4 + global policies
+  app/policy/policies.py          # P1–P4, SOD_NOT_SELF + global policies
   app/policy/__init__.py          # @authorize decorator + route guard (enforcement point)
   app/checkout.py                 # pricing, atomic checkout, idempotency
   app/coupons.py                  # coupon rules

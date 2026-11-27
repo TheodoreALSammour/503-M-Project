@@ -1,4 +1,4 @@
-"""ABAC policies P1-P4 and the global policies.
+"""ABAC policies P1-P4, the separation-of-duties policy and the global policies.
 
 Each policy is a pure function ``(subject, resource, params) -> Effect``.
 Subject attributes come from the database (see engine.Subject.from_user);
@@ -125,6 +125,20 @@ def p4_order_state(_subject, resource, params):
     return PolicyResult(Effect.DENY, f"{current} -> {to_status} not allowed for {trigger}")
 
 
+# --------------------------------------------------------------------------
+# Separation of duties: an admin cannot act on their own account
+# --------------------------------------------------------------------------
+def sod_not_self(subject, resource, _params):
+    """The resource is the target account, loaded from the database by the
+    route. An admin may suspend or reactivate any account except their own."""
+    target_id = getattr(resource, "id", None)
+    if target_id is None:
+        return PolicyResult(Effect.DENY, "no target account")
+    if target_id == subject.user_id:
+        return PolicyResult(Effect.DENY, "admin cannot act on own account")
+    return PolicyResult(Effect.PERMIT, "target is another account")
+
+
 REGISTRY = {
     "ACCOUNT_ACTIVE": account_active,
     "CREDENTIALS_CHANGE_REQUIRED": credentials_change_required,
@@ -132,4 +146,5 @@ REGISTRY = {
     "P2_SELLER_VERIFICATION": p2_seller_verification,
     "P3_NO_SELF_DEALING": p3_no_self_dealing,
     "P4_ORDER_STATE": p4_order_state,
+    "SOD_NOT_SELF": sod_not_self,
 }

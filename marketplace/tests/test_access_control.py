@@ -1,9 +1,27 @@
 """End-to-end authorization tests through the HTTP layer."""
+import json
+import logging
+from contextlib import contextmanager
+
 import pytest
 
 from app.policy import POLICY_ATTR
 
 from .conftest import PASSWORDS, checkout_body, login, product_id, token_for, user_id
+
+
+@contextmanager
+def audit_events():
+    """Collect the JSON audit events written while the block runs."""
+    seen = []
+    handler = logging.Handler()
+    handler.emit = lambda record: seen.append(json.loads(record.getMessage()))
+    audit_log = logging.getLogger("marketplace.audit")
+    audit_log.addHandler(handler)
+    try:
+        yield seen
+    finally:
+        audit_log.removeHandler(handler)
 
 
 # ------------------------------------------------- every route uses the PEP --
@@ -71,9 +89,26 @@ def test_failed_login_generic(client):
 
 
 def test_suspended_cannot_login(client):
-    r = client.post("/api/auth/login", json={"email": "suspended@example.com",
-                                             "password": PASSWORDS["suspended@example.com"]})
-    assert r.status_code == 403
+    with audit_events() as seen:
+        right = client.post("/api/auth/login", json={"email": "suspended@example.com",
+                                                     "password": PASSWORDS["suspended@example.com"]})
+    assert right.status_code == 401 and "access_token" not in right.get_json()
+    # The real reason is logged server-side only.
+    assert any(e["event"] == "auth.login_failed" and e["reason"] == "account_suspended" for e in seen)
+
+
+def test_suspended_login_does_not_confirm_password(client):
+    """A suspended account must answer a correct password exactly like a wrong
+    one (and like an unknown email), or 'suspended' would leak the password."""
+    def attempt(email, password):
+        r = client.post("/api/auth/login", json={"email": email, "password": password})
+        body = r.get_json()
+        return r.status_code, body["error"], body["message"]
+
+    right = attempt("suspended@example.com", PASSWORDS["suspended@example.com"])
+    wrong = attempt("suspended@example.com", "Wrong#Password2026")
+    unknown = attempt("nobody@example.com", "Wrong#Password2026")
+    assert right == wrong == unknown == (401, "unauthorized", "Invalid email or password.")
 
 
 def _admin_ready(client):
@@ -157,8 +192,16 @@ def test_admin_must_change_credentials_before_anything(client):
 
 def test_admin_cannot_suspend_self(app, client):
     h = _admin_ready(client)
-    r = client.post(f"/api/admin/users/{user_id(app, 'root@marketplace.local')}/suspend", headers=h)
-    assert r.status_code == 403
+    me = user_id(app, "root@marketplace.local")
+    with audit_events() as seen:
+        for action in ("suspend", "reactivate"):
+            r = client.post(f"/api/admin/users/{me}/{action}", headers=h)
+            assert r.status_code == 403
+    # The denial comes from the central policy module, not from route code.
+    denials = [e for e in seen if e["event"] == "authz.decision" and e["decision"] == "deny"]
+    assert [(e["action"], e["policy"]) for e in denials] == [
+        ("account.suspend", "SOD_NOT_SELF"), ("account.reactivate", "SOD_NOT_SELF")]
+    assert client.get("/api/admin/users", headers=h).status_code == 200  # still active
 
 
 @pytest.mark.parametrize("who", ["finance1@marketplace.local"])

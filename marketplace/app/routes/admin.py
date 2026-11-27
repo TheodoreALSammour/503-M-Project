@@ -97,12 +97,7 @@ def list_users():
 @authorize("account.suspend", loader=_load_user)
 def suspend_user(user_id):
     empty_body()
-    target = g.resource
-    if target.id == g.user.id:
-        # Separation of duties: an admin cannot act on their own account.
-        audit("authz.decision", decision="deny", action="account.suspend", policy="SOD_NOT_SELF",
-              reason="admin cannot suspend own account", subject_id=g.user.id)
-        return jsonify(error="forbidden", message="You cannot suspend your own account."), 403
+    target = g.resource  # SOD_NOT_SELF (policy module) already denied the admin's own account
     if target.status == AccountStatus.SUSPENDED:
         return jsonify(error="conflict", message="Account is already suspended."), 409
     target.status = AccountStatus.SUSPENDED
@@ -116,11 +111,7 @@ def suspend_user(user_id):
 @authorize("account.reactivate", loader=_load_user)
 def reactivate_user(user_id):
     empty_body()
-    target = g.resource
-    if target.id == g.user.id:
-        audit("authz.decision", decision="deny", action="account.reactivate", policy="SOD_NOT_SELF",
-              reason="admin cannot act on own account", subject_id=g.user.id)
-        return jsonify(error="forbidden", message="You cannot change your own account status."), 403
+    target = g.resource  # SOD_NOT_SELF (policy module) already denied the admin's own account
     if target.status == AccountStatus.ACTIVE:
         return jsonify(error="conflict", message="Account is already active."), 409
     target.status = AccountStatus.ACTIVE

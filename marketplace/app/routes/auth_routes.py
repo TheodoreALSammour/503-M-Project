@@ -62,12 +62,16 @@ def login():
         raise ValidationError("mode must be 'bearer' or 'cookie'.", field="mode")
 
     user = User.query.filter_by(email=email).first()
-    if not verify_password(user, password):
-        audit("auth.login_failed", email=email[:254], reason="bad_credentials")
+    password_ok = verify_password(user, password)  # always runs Argon2 (timing)
+    if not password_ok or user.status != AccountStatus.ACTIVE:
+        # A suspended account gets exactly the same reply as a wrong password,
+        # whether or not the password was right: otherwise "suspended" would
+        # confirm a guessed password. The real reason is only in the log.
+        if not password_ok:
+            audit("auth.login_failed", email=email[:254], reason="bad_credentials")
+        else:
+            audit("auth.login_failed", user_id=user.id, reason="account_suspended")
         return jsonify(error="unauthorized", message="Invalid email or password."), 401
-    if user.status != AccountStatus.ACTIVE:
-        audit("auth.login_failed", user_id=user.id, reason="account_suspended")
-        return jsonify(error="forbidden", message="This account is suspended."), 403
 
     token, csrf, _s = create_session(user, mode)
     db.session.commit()

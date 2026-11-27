@@ -82,8 +82,10 @@ permissions:
   seller.list:       {admin: OK}
   seller.verify:     {admin: OK}
   account.list:      {admin: OK}
-  account.suspend:   {admin: OK}
-  account.reactivate: {admin: OK}
+  # The role grants suspend/reactivate, but separation of duties forbids it on
+  # the admin's own account, so the specific request is decided by ABAC (C).
+  account.suspend:   {admin: C}
+  account.reactivate: {admin: C}
 
 abac:
   coupon.validate:
@@ -121,3 +123,8 @@ abac:
   seller_order.ship:
     - {policy: P1_OWNERSHIP, as: seller}
     - {policy: P4_ORDER_STATE, to: shipped, trigger: seller}
+
+  account.suspend:
+    - {policy: SOD_NOT_SELF}
+  account.reactivate:
+    - {policy: SOD_NOT_SELF}

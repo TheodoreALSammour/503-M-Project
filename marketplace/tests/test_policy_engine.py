@@ -51,6 +51,10 @@ def product(seller, status=ProductStatus.PUBLISHED, pid=5):
     return Obj(id=pid, seller_id=seller, status=status)
 
 
+def account(uid, status=AccountStatus.ACTIVE):
+    return Obj(id=uid, status=status)
+
+
 # ---------------------------------------------------------------- RBAC ------
 def test_rbac_ok_allows(engine):
     d = engine.authorize(FINANCE, "coupon.create", log=False)
@@ -158,6 +162,25 @@ def test_deny_overrides(engine):
     assert not d.allowed and d.policy == "P4_ORDER_STATE"
 
 
+# ---------------------------------------------------- SoD: not own account ---
+@pytest.mark.parametrize("action", ["account.suspend", "account.reactivate"])
+def test_sod_admin_can_act_on_another_account(engine, action):
+    d = engine.authorize(ADMIN, action, account(BUYER.user_id), log=False)
+    assert d.allowed and d.policy == "SOD_NOT_SELF"
+
+
+@pytest.mark.parametrize("action", ["account.suspend", "account.reactivate"])
+def test_sod_admin_cannot_act_on_own_account(engine, action):
+    d = engine.authorize(ADMIN, action, account(ADMIN.user_id), log=False)
+    assert not d.allowed and d.policy == "SOD_NOT_SELF"
+
+
+def test_sod_other_roles_stopped_by_rbac_first(engine):
+    # A buyer "suspending" their own account never reaches the ABAC policy.
+    d = engine.authorize(BUYER, "account.suspend", account(BUYER.user_id), log=False)
+    assert not d.allowed and d.policy == "RBAC"
+
+
 # ---------------------------------------------------- global policies --------
 def test_suspended_account_denied_everything(engine):
     s = subj(1, Role.BUYER, status=AccountStatus.SUSPENDED)
@@ -225,3 +248,6 @@ def test_policy_functions_directly():
         == pol.Effect.PERMIT
     assert pol.p4_order_state(BUYER, order(1, 2, "paid"), {"to": "delivered", "trigger": "buyer"}).effect \
         == pol.Effect.DENY
+    assert pol.sod_not_self(ADMIN, account(1), {}).effect == pol.Effect.PERMIT
+    assert pol.sod_not_self(ADMIN, account(ADMIN.user_id), {}).effect == pol.Effect.DENY
+    assert pol.sod_not_self(ADMIN, object(), {}).effect == pol.Effect.DENY  # no target id
